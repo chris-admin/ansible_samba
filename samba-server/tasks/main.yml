@@ -1,0 +1,84 @@
+---
+
+- name: Install samba and dependencies
+  ansible.builtin.yum:
+    name:
+      - samba
+      - samba-common
+      - cifs-utils
+    state: present
+  
+- name: Sample Config for Samba
+  ansible.builtin.template:
+    src: smb.conf.j2
+    dest: /etc/samba/smb.conf
+    owner: root
+    group: root
+    mode: u=rw,g=r,o=r
+
+- name: create usergroup for samba
+  ansible.builtin.group:
+    name: smb-users
+    state: present
+
+- name: Create a PoC Share
+  lineinfile:
+    dest: /etc/samba/smb.conf
+    line: '{{ item }}'
+  with_items:
+    - ''
+    - '[removeme]'
+    - '   comment = poc share to verify setup'
+    - '   path = /data/removeme/'
+    - '   browsable = yes'
+    - '   writeable = yes'
+    - '   valid users = @smb-users'
+    - ''
+- name: Create the PoC Root Folder
+  ansible.builtin.file:
+    path: /data
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: ... and the share folder 
+  ansible.builtin.file:
+    path: /data/removeme
+    state: directory
+    owner: root
+    group: smb-users
+    mode: '0775'
+
+- name: configure firewall, allow samba-client traffic
+  firewalld:
+    service: samba
+    permanent: true
+    state: enabled
+
+- name: reload service firewalld
+  systemd:
+    name: firewalld
+    state: reloaded
+
+- name: Apply SELinux file context
+  shell: |
+    semanage fcontext -a -t samba_share_t "/data/removeme(/.*)?"
+    restorecon -Rv /data/removeme
+
+- name: start smb & nmb
+  ansible.builtin.systemd:
+    state: restarted
+    enabled: true
+    name: "{{ item}}"
+  with_items:
+    - smb
+    - nmb
+
+- name: some post nucular messages
+  ansible.builtin.debug:
+    msg: 
+    - "to add an testuser:"
+    - "  useradd -g smb-users frankenstein"
+    - "  smbpasswd -a frankenstein"
+    
